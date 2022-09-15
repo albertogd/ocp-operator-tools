@@ -1,0 +1,33 @@
+yq_binary="yq_linux_amd64"
+yq_version="v4.2.0"
+manifest_file="/tmp/manifest"
+
+if [ $# -ne 2 ]; then
+  echo "Need operator manifest name and version as arguments: getOperatorImages.sh <manifest name> <operator version>"
+  echo "Example: getOperatorImages.sh advanced-cluster-management 2.6.1"
+  exit 1
+else
+  manifest_name=$1
+  operator_version=$2
+  oc get packagemanifest $manifest_name -n openshift-marketplace -o yaml > $manifest_file
+fi
+
+# Install yq
+which yq 2>&1 > /dev/null
+if [ $? -eq 1 ]; then
+  wget https://github.com/mikefarah/yq/releases/download/${yq_version}/${yq_binary}.tar.gz -O - | tar xz && sudo mv ${yq_binary} /usr/local/bin/yq && sudo chmod +rx /usr/local/bin/yq
+fi
+
+# Get Related images from PackageManifest
+related_images=$(operator_version=$operator_version yq '.status.channels[] | select(.currentCSVDesc.version == strenv(operator_version)).currentCSVDesc.relatedImages ' $manifest_file | grep sha256 | cut -d' ' -f2)
+
+if [ -z "$related_images" ]; then
+  echo "Error: $manifest_name release version $operator_version not found in PackageManifest $manifest_file"
+  exit 2
+fi
+
+#echo "<<< START LIST OF $manifest_name OPERATOR $operator_version IMAGES >>>"
+
+echo "$related_images"
+
+#echo "<<< END LIST OF $manifest_name OPERATOR $operator_version IMAGES >>>"

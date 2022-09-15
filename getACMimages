@@ -1,0 +1,134 @@
+agent_images=(
+"registry.redhat.io/multicluster-engine/cluster-proxy-addon-rhel8"
+"registry.redhat.io/multicluster-engine/cluster-proxy-rhel8"
+"registry.redhat.io/multicluster-engine/multicloud-manager-rhel8"
+"registry.redhat.io/rhacm2/cert-policy-controller-rhel8"
+"registry.redhat.io/rhacm2/config-policy-controller-rhel8"
+"registry.redhat.io/rhacm2/governance-policy-status-sync-rhel8"
+"registry.redhat.io/rhacm2/governance-policy-template-sync-rhel8"
+"registry.redhat.io/rhacm2/iam-policy-controller-rhel8"
+"registry.redhat.io/rhacm2/kube-rbac-proxy-rhel8"
+"registry.redhat.io/rhacm2/multicluster-operators-subscription-rhel8"
+"registry.redhat.io/multicluster-engine/registration-operator-rhel8"
+"registry.redhat.io/multicluster-engine/registration-rhel8"
+"registry.redhat.io/multicluster-engine/work-rhel8"
+)
+
+channel_image="multicluster-operators-channel-rhel8"
+yq_binary="yq_linux_amd64"
+yq_version="v4.2.0"
+acm_mirror_dir="/tmp/acm-mirror"
+acm_mirror_repo="https://github.com/stolostron/deploy.git"
+acm_manifest_file="/tmp/acm-manifest"
+mce_manifest_file="/tmp/mce-manifest"
+
+if [ $# -eq 2 ]; then
+  acm_version=$1
+  mce_version=$2
+  oc get packagemanifest advanced-cluster-management -n openshift-marketplace -o yaml > $acm_manifest_file
+  oc get packagemanifest multicluster-engine -n openshift-marketplace -o yaml > $mce_manifest_file
+elif [ $# -eq 4 ]; then
+  acm_version=$1
+  mce_version=$2
+  acm_manifest_file=$3
+  mce_manifest_file=$4
+else
+  echo "Need ACM version and ACM packagemanifest (optional) as arguments: getImages.sh <ACM version> <MCE version> [optional] <ACM packagemanifest> <MCE packagemanifest>"
+  echo ""
+  echo "<-- Required parameters -->"
+  echo "1 - ACM version: ACM version: 2.5.1, 2.6.1... "
+  echo "2 - MCE version: ACM version: 2.1.1, 2.0.1... "
+  echo ""
+  echo "<-- Optional parameters -->"
+  echo "3 - ACM Packagemanifest: This parameter is optional. If empty, it will execute 'oc get packagemanifest advanced-cluster-management -n openshift-marketplace -o yaml > /tmp/advanced-cluster-management-manifest"
+  echo "4 - MCE Packagemanifest: This parameter is optional. If empty, it will execute 'oc get packagemanifest multicluster-engine -n openshift-marketplace -o yaml > /tmp/advanced-cluster-management-manifest"
+  exit 1
+fi
+
+# Install yq
+which yq 2>&1 > /dev/null
+if [ $? -eq 1 ]; then
+  echo "yq not found. Installing yq"
+  wget https://github.com/mikefarah/yq/releases/download/${yq_version}/${yq_binary}.tar.gz -O - | tar xz && sudo mv ${yq_binary} /usr/local/bin/yq && sudo chmod +rx /usr/local/bin/yq
+else
+  echo "yq found in $(which yq)"
+fi
+
+# Get ACM Mirror Image List
+if  [ ! -d $acm_mirror_dir ]; then
+  echo "Cloning repo $acm_mirror_repo in $acm_mirror_dir"
+  git clone $acm_mirror_repo $acm_mirror_dir 2>&1 > /dev/null
+else
+  echo "Repo $acm_mirror_repo found in $acm_mirror_dir: updating repo"
+  (cd $acm_mirror_dir && git checkout master && git pull) 2>&1 > /dev/null
+fi
+
+echo "Getting image list for ACM $acm_version using packagemanifest in $acm_manifest_file"
+
+# Get ACM Related images from PackageManifest
+acm_related_images=$(acm_version=$acm_version yq '.status.channels[] | select(.currentCSVDesc.version == strenv(acm_version)).currentCSVDesc.relatedImages ' $acm_manifest_file | grep sha256 | cut -d' ' -f2)
+
+if [ -z "$acm_related_images" ]; then
+  echo "Error: ACM Release version $acm_version not found in PackageManifest $acm_manifest_file"
+  exit 2
+fi
+
+echo "Getting image list for MCE $mce_version using packagemanifest in $mce_manifest_file"
+
+# Get MCE Related images from PackageManifest
+mce_related_images=$(mce_version=$mce_version yq '.status.channels[] | select(.currentCSVDesc.version == strenv(mce_version)).currentCSVDesc.relatedImages ' $mce_manifest_file | grep sha256 | cut -d' ' -f2)
+
+if [ -z "$mce_related_images" ]; then
+  echo "Error: MCE Release version $mce_version not found in PackageManifest $mce_manifest_file"
+  exit 2
+fi
+
+# Get ACM Channel Image Hash
+channel_image_hash=$(echo "$acm_related_images" | grep "$channel_image" | cut -d':' -f2 | cut -d'=' -f1)
+
+if [ -z "$channel_image_hash" ]; then
+  echo "Error: Channel image not found in related images."
+  echo "Related Image List:"
+  echo "$acm_related_images"
+  exit 3
+fi
+
+# Get Mirror build image list
+mirror_image_file=$(grep -iRH $channel_image_hash $acm_mirror_dir/mirror  | cut -d':' -f1)
+
+if [ -z $mirror_image_file ]; then
+  echo "Error: Not found any build file with the image hash $channel_image_hash in $acm_mirror_dir/mirror"
+  exit 4
+fi
+
+
+echo ""
+echo ""
+
+echo "<<< START LIST OF ACM AGENT IMAGES >>>"
+
+for image in ${agent_images[@]}; do
+  image_name=$(echo $image | cut -d'/' -f3)
+  image_hash=$(grep $image_name $mirror_image_file | cut -d':' -f2 | cut -d'=' -f1)
+  echo "$image@sha256:$image_hash"
+done
+
+echo "<<< END LIST OF ACM AGENT IMAGES >>>"
+
+echo ""
+echo ""
+
+echo "<<< START LIST OF ACM OPERATOR $acm_version IMAGES >>>"
+
+echo "$acm_related_images"
+
+echo "<<< END LIST OF ACM OPERATOR $acm_version IMAGES >>>"
+
+echo ""
+echo ""
+
+echo "<<< START LIST OF MCE OPERATOR $mce_version IMAGES >>>"
+
+echo "$mce_related_images"
+
+echo "<<< END LIST OF MCE OPERATOR $mce_version IMAGES >>>"
