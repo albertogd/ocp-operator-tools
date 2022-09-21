@@ -25,7 +25,7 @@ Example: Get all the related images of
 ## getACMimages
 Retrieve all the related images of ACM operator. This is useful to get the image list to pull for disconnected environments. The output will show different sections for Agent images, ACM images and MCE images.
 
-    $ ./getACMimages.sh 2.6.0 2.1.0
+    $ ./getACMimages 2.6.0 2.1.0
     <<< START LIST OF ACM AGENT IMAGES >>>
     registry.redhat.io/rhacm2/cert-policy-controller-rhel8@sha256:09ddf46ce8fdb73fa1e71acbbd9852d2082c6521984aff37778365e5fa4ec7e8
     registry.redhat.io/rhacm2/config-policy-controller-rhel8@sha256:e651d5d18a06b18de8b927f2c51e17a422b69a667858ed23c52731d3481a5df4
